@@ -1,12 +1,22 @@
 import sys, os
 from pathlib import Path
 
-# ---------------- PATH SETUP ----------------
-ROOT = Path(__file__).resolve().parents[1]      # -> yoloV8ES/
-sys.path.insert(0, str(ROOT))                  # allow `model/...` imports
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from ultralytics import YOLO
+
+# 1️⃣ import YOUR custom modules
+from model.edcm import EDCM
+from model.sgam import SGAM
+
+# 2️⃣ register them into Ultralytics' model builder namespace
+import ultralytics.nn.tasks as tasks
+tasks.EDCM = EDCM
+tasks.SGAM = SGAM
+
 from model.loss_wiou import WIoUv3Loss
+
 
 
 def main():
