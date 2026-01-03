@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 
 # 1️⃣ import your WIoU implementation
-from model.loss_wiou import WIoUv3Loss
+from yoloV8ES.model.loss_wiou import WIoUv3Loss
 
 
 def main():
