@@ -21,23 +21,23 @@ backbone:
   - [-1, 1, SPPF, [1024, 5]]           # 9
 
 head:
-  - [-1, 1, Upsample, [None, 2, 'nearest']]   # 10
-  - [[-1, 6], 1, Concat, [1]]                 # 11  cat backbone P4
-  - [-1, 1, C2f, [512]]                       # 12
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]   # 10
+  - [[-1, 6], 1, Concat, [1]]                    # 11  cat backbone P4
+  - [-1, 1, C2f, [512]]                          # 12
 
   # --- ES: Spatial-Group Attention Module ---
-  - [-1, 1, SGAM, [512]]                      # 13
+  - [-1, 1, SGAM, [512]]                         # 13
   
-  - [-1, 1, Upsample, [None, 2, 'nearest']]   # 14
-  - [[-1, 4], 1, Concat, [1]]                 # 15  cat backbone P3
-  - [-1, 1, C2f, [256]]                       # 16  (P3/8 small)
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]   # 14
+  - [[-1, 4], 1, Concat, [1]]                    # 15  cat backbone P3
+  - [-1, 1, C2f, [256]]                          # 16  (P3/8 small)
 
-  - [-1, 1, Conv, [256, 3, 2]]                # 17
-  - [[-1, 13], 1, Concat, [1]]                # 18  cat head P4
-  - [-1, 1, C2f, [512]]                       # 19  (P4/16 medium)
+  - [-1, 1, Conv, [256, 3, 2]]                   # 17
+  - [[-1, 13], 1, Concat, [1]]                   # 18  cat head P4
+  - [-1, 1, C2f, [512]]                          # 19  (P4/16 medium)
 
-  - [-1, 1, Conv, [512, 3, 2]]                # 20
-  - [[-1, 9], 1, Concat, [1]]                 # 21  cat head P5
-  - [-1, 1, C2f, [1024]]                      # 22 (P5/32 large)
+  - [-1, 1, Conv, [512, 3, 2]]                   # 20
+  - [[-1, 9], 1, Concat, [1]]                    # 21  cat head P5
+  - [-1, 1, C2f, [1024]]                         # 22 (P5/32 large)
 
-  - [[16, 19, 22], 1, Detect, [nc]]           # 23  Detect(P3, P4, P5)
+  - [[16, 19, 22], 1, Detect, [nc]]              # 23  Detect(P3, P4, P5)
