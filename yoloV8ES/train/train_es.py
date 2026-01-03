@@ -17,10 +17,11 @@ tasks.SGAM = SGAM
 
 from model.loss_wiou import WIoUv3Loss
 from ultralytics.engine.trainer import BaseTrainer
+from ultralytics.models.yolo.detect import DetectionTrainer
 
 
 # 3️⃣ Custom trainer to inject WIoU-v3 loss
-class WiouTrainer(BaseTrainer):
+class WiouTrainer(DetectionTrainer):
     def build_loss(self):
         loss = super().build_loss()
         print("\n🔁 Injecting WIoU-v3 into loss...\n")
