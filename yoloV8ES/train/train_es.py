@@ -16,29 +16,33 @@ tasks.EDCM = EDCM
 tasks.SGAM = SGAM
 
 from model.loss_wiou import WIoUv3Loss
+from ultralytics.engine.trainer import BaseTrainer
+
+
+# 3️⃣ Custom trainer to inject WIoU-v3 loss
+class WiouTrainer(BaseTrainer):
+    def build_loss(self):
+        loss = super().build_loss()
+        print("\n🔁 Injecting WIoU-v3 into loss...\n")
+        loss.iou_loss = WIoUv3Loss()
+        return loss
 
 
 def main():
 
-    # ---------------- LOAD MODEL ----------------
-    model_file = ROOT / "yolov8es.yaml"         # <-- architecture file
-    data_file  = ROOT / "rdd2022.yaml"          # <-- dataset config
+    model_file = ROOT / "yolov8es.yaml"
+    data_file  = ROOT / "rdd2022.yaml"
 
     print(f"\n📄 Using model file: {model_file}")
     print(f"📄 Using data file:  {data_file}\n")
 
     model = YOLO(str(model_file))
 
-    # ---------------- PRINT ARCHITECTURE ----------------
     print("\n================ MODEL SUMMARY (TABLE) ================\n")
     model.model.info(verbose=True)
 
     print("\n================ FULL ARCHITECTURE (PyTorch) ================\n")
     print(model.model)
-
-    # ---------------- REPLACE LOSS WITH WIoU-V3 ----------------
-    print("\n🔁 Replacing default IoU loss with WIoU-v3...\n")
-    model.model.loss.iou_loss = WIoUv3Loss()
 
     # ---------------- TRAIN ----------------
     model.train(
@@ -62,6 +66,7 @@ def main():
         name="yolov8es_wiouv3_layers",
         exist_ok=True,
         verbose=True,
+        trainer=WiouTrainer,   # 👈 important
     )
 
 
