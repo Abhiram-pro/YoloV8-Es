@@ -18,7 +18,6 @@ tasks.SGAM = SGAM
 from model.loss_wiou import WIoUv3Loss
 
 
-
 def main():
 
     # ---------------- LOAD MODEL ----------------
@@ -36,9 +35,6 @@ def main():
 
     print("\n================ FULL ARCHITECTURE (PyTorch) ================\n")
     print(model.model)
-
-    # build graph so loss exists
-    model.model.build()
 
     # ---------------- REPLACE LOSS WITH WIoU-V3 ----------------
     print("\n🔁 Replacing default IoU loss with WIoU-v3...\n")
