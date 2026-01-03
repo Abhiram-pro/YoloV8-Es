@@ -1,9 +1,12 @@
+import sys, os
+from pathlib import Path
+
+# ensure project root is importable
+ROOT = Path(__file__).resolve().parents[1]   # <-- yoloV8ES/
+sys.path.insert(0, str(ROOT))
+
 from ultralytics import YOLO
-
-# 1️⃣ import your WIoU implementation
-from yoloV8ES.model.loss_wiou import WIoUv3Loss
-
-
+from model.loss_wiou import WIoUv3Loss
 def main():
 
     # 2️⃣ load your ES model
