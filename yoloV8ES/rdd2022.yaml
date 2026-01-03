@@ -1,0 +1,16 @@
+# RDD2022 dataset (your Kaggle layout)
+
+path: /kaggle/input/crackathon-data/randomized_dataset
+
+train: train/images
+val: val/images
+test: test/images   # optional, YOLO will just ignore it if not used
+
+nc: 5
+
+names:
+  0: D00
+  1: D10
+  2: D20
+  3: D43
+  4: D44
