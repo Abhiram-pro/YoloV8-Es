@@ -1,34 +1,42 @@
 import sys, os
 from pathlib import Path
 
-# ensure project root is importable
-ROOT = Path(__file__).resolve().parents[1]   # <-- yoloV8ES/
-sys.path.insert(0, str(ROOT))
+# ---------------- PATH SETUP ----------------
+ROOT = Path(__file__).resolve().parents[1]      # -> yoloV8ES/
+sys.path.insert(0, str(ROOT))                  # allow `model/...` imports
 
 from ultralytics import YOLO
 from model.loss_wiou import WIoUv3Loss
+
+
 def main():
 
-    # 2️⃣ load your ES model
-    model = YOLO("yolov8es.yaml")
+    # ---------------- LOAD MODEL ----------------
+    model_file = ROOT / "yolov8es.yaml"         # <-- architecture file
+    data_file  = ROOT / "rdd2022.yaml"          # <-- dataset config
 
-    # ---- PRINT THE ENTIRE MODEL ----
+    print(f"\n📄 Using model file: {model_file}")
+    print(f"📄 Using data file:  {data_file}\n")
+
+    model = YOLO(str(model_file))
+
+    # ---------------- PRINT ARCHITECTURE ----------------
     print("\n================ MODEL SUMMARY (TABLE) ================\n")
     model.model.info(verbose=True)
 
     print("\n================ FULL ARCHITECTURE (PyTorch) ================\n")
-    print(model.model)        # <-- expands every submodule and layer
+    print(model.model)
 
-    # 3️⃣ build graph so loss object exists
+    # build graph so loss exists
     model.model.build()
 
-    # 4️⃣ enforce WIoU-v3 loss
+    # ---------------- REPLACE LOSS WITH WIoU-V3 ----------------
     print("\n🔁 Replacing default IoU loss with WIoU-v3...\n")
     model.model.loss.iou_loss = WIoUv3Loss()
 
-    # 5️⃣ train (paper-style config)
+    # ---------------- TRAIN ----------------
     model.train(
-        data="rdd2022.yaml",
+        data=str(data_file),
         imgsz=512,
         epochs=100,
         batch=16,
