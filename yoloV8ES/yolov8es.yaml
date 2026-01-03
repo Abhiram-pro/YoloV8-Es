@@ -26,7 +26,7 @@ head:
   - [-1, 1, C2f, [512]]                          # 12
 
   # --- ES: Spatial-Group Attention Module ---
-  - [-1, 1, SGAM, [512]]                         # 13
+ - [-1, 1, SGAM, [128]]                       # 13
   
   - [-1, 1, nn.Upsample, [None, 2, 'nearest']]   # 14
   - [[-1, 4], 1, Concat, [1]]                    # 15  cat backbone P3
