@@ -16,21 +16,19 @@ class EDCM(nn.Module):
     - Per-sample adaptive convolution weights
     
     Args:
-        c1: Number of input channels (already scaled by width_multiple)
-        c2: Number of output channels (already scaled, optional, defaults to c1)
+        c1: Number of input channels
+        c2: Number of output channels (optional, defaults to c1)
         k: Kernel size (default: 3)
         s: Stride (ignored, always 1 per paper)
         g: Number of groups for grouped convolution
     """
 
-    def __init__(self, c1=None, c2=None, k=3, s=1, g=1):
+    def __init__(self, c1, c2=None, k=3, s=1, g=1):
         super().__init__()
         
-        # Handle case where c1 might not be passed
-        if c1 is None:
-            raise ValueError("EDCM requires c1 (input channels) to be specified")
-        
-        # c2 defaults to c1 if not specified
+        # Handle various argument patterns from YAML parser
+        # c1 is always input channels (from previous layer)
+        # c2 can be output channels, or None (default to c1)
         if c2 is None:
             c2 = c1
 
@@ -52,49 +50,24 @@ class EDCM(nn.Module):
         # Global average pooling for attention
         self.gap = nn.AdaptiveAvgPool2d(1)
 
-        # Attention branches will be created lazily on first forward pass
-        # This allows us to handle the actual runtime channel dimensions
-        self._attention_initialized = False
-        
+        # 4 attention branches for dynamic kernel selection (PSA)
+        def make_branch():
+            mid_channels = max(c1 // 4, 4)
+            return nn.Sequential(
+                nn.Linear(c1, mid_channels, bias=False),
+                nn.ReLU(inplace=True),
+                nn.Linear(mid_channels, 4, bias=True),
+            )
+
+        self.fc_s = make_branch()  # spatial attention
+        self.fc_c = make_branch()  # channel attention
+        self.fc_f = make_branch()  # filter attention
+        self.fc_w = make_branch()  # kernel attention
+
         self.bn = nn.BatchNorm2d(c2)
-    
-    def _init_attention_branches(self, actual_channels, device):
-        """Initialize attention branches with actual runtime channel dimensions"""
-        mid_channels = max(actual_channels // 4, 4)
-        
-        self.fc_s = nn.Sequential(
-            nn.Linear(actual_channels, mid_channels, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid_channels, 4, bias=True),
-        ).to(device)  # spatial attention
-        
-        self.fc_c = nn.Sequential(
-            nn.Linear(actual_channels, mid_channels, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid_channels, 4, bias=True),
-        ).to(device)  # channel attention
-        
-        self.fc_f = nn.Sequential(
-            nn.Linear(actual_channels, mid_channels, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid_channels, 4, bias=True),
-        ).to(device)  # filter attention
-        
-        self.fc_w = nn.Sequential(
-            nn.Linear(actual_channels, mid_channels, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid_channels, 4, bias=True),
-        ).to(device)  # kernel attention
-        
-        self._attention_initialized = True
-        self._actual_channels = actual_channels
 
     def forward(self, x):
         b, c, _, _ = x.shape
-
-        # Initialize attention branches on first forward pass with actual channel dimensions
-        if not self._attention_initialized:
-            self._init_attention_branches(c, x.device)
 
         # Compute attention weights for each dimension
         pooled = self.gap(x).view(b, c)
