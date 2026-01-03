@@ -16,8 +16,8 @@ class EDCM(nn.Module):
     - Per-sample adaptive convolution weights
     
     Args:
-        c1: Number of input channels
-        c2: Number of output channels (optional, defaults to c1)
+        c1: Number of input channels (already scaled by width_multiple)
+        c2: Number of output channels (already scaled, optional, defaults to c1)
         k: Kernel size (default: 3)
         s: Stride (ignored, always 1 per paper)
         g: Number of groups for grouped convolution
@@ -26,9 +26,7 @@ class EDCM(nn.Module):
     def __init__(self, c1, c2=None, k=3, s=1, g=1):
         super().__init__()
         
-        # Handle various argument patterns from YAML parser
-        # c1 is always input channels (from previous layer)
-        # c2 can be output channels, or None (default to c1)
+        # c1 and c2 are already scaled by Ultralytics' width_multiple
         if c2 is None:
             c2 = c1
 
@@ -51,18 +49,32 @@ class EDCM(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d(1)
 
         # 4 attention branches for dynamic kernel selection (PSA)
-        def make_branch():
-            mid_channels = max(c1 // 4, 4)
-            return nn.Sequential(
-                nn.Linear(c1, mid_channels, bias=False),
-                nn.ReLU(inplace=True),
-                nn.Linear(mid_channels, 4, bias=True),
-            )
-
-        self.fc_s = make_branch()  # spatial attention
-        self.fc_c = make_branch()  # channel attention
-        self.fc_f = make_branch()  # filter attention
-        self.fc_w = make_branch()  # kernel attention
+        # Important: Use c1 (actual scaled channels), not a hardcoded value
+        mid_channels = max(c1 // 4, 4)
+        
+        self.fc_s = nn.Sequential(
+            nn.Linear(c1, mid_channels, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_channels, 4, bias=True),
+        )  # spatial attention
+        
+        self.fc_c = nn.Sequential(
+            nn.Linear(c1, mid_channels, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_channels, 4, bias=True),
+        )  # channel attention
+        
+        self.fc_f = nn.Sequential(
+            nn.Linear(c1, mid_channels, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_channels, 4, bias=True),
+        )  # filter attention
+        
+        self.fc_w = nn.Sequential(
+            nn.Linear(c1, mid_channels, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_channels, 4, bias=True),
+        )  # kernel attention
 
         self.bn = nn.BatchNorm2d(c2)
 
