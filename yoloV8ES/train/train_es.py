@@ -57,6 +57,7 @@ def main():
         imgsz=512,
         epochs=100,
         batch=16,
+        device=0,          
         optimizer="SGD",
         lr0=0.01,
         lrf=0.01,
