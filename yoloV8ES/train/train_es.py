@@ -2,6 +2,10 @@ import sys, os
 from pathlib import Path
 
 os.environ["WANDB_MODE"] = "disabled"   # 👈 prevents W&B prompts
+os.environ["RAY_AIR_NEW_CALLBACK_API"] = "0"
+
+from ultralytics.utils import SETTINGS
+SETTINGS["ray"] = False
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
