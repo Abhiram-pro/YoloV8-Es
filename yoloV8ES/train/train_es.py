@@ -7,12 +7,6 @@ os.environ["RAY_AIR_NEW_CALLBACK_API"] = "0"
 from ultralytics.utils import SETTINGS
 SETTINGS["ray"] = False
 
-from ultralytics.utils.callbacks import callbacks
-
-# disable any Ray callbacks if they slipped in
-callbacks['on_fit_epoch_end'] = []
-callbacks['on_fit_start'] = []
-
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
