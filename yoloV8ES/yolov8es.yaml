@@ -1,51 +1,48 @@
 # YOLOv8-ES: Enhanced Road Crack Detection Model
-# STRICTLY FOLLOWS YOLOv8n SCALING
+# EXPLICIT SCALING VERSION (Fixes Channel Mismatch)
 
 nc: 4
-scales:
-  n: [0.33, 0.25, 1024] 
-
-# -------------------------------------------------------------------
-# Global Scaling (CRITICAL: Must be top-level for custom parser logic)
+# We manually scaled the width, so we set width_multiple to 1.0
+# We keep depth_multiple at 0.33 for the layer repetition count
 depth_multiple: 0.33
-width_multiple: 0.25
-# -------------------------------------------------------------------
+width_multiple: 1.0  
 
 backbone:
   # [from, repeats, module, args]
-  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2  (64*0.25 = 16 channels)
+  # Layer 0: Conv [16, 3, 2] (Originally 64 * 0.25)
+  - [-1, 1, Conv, [16, 3, 2]]          # 0-P1/2
   
-  # EDCM Args: [128, 3, 1]
-  # Note: 128 is output channel count. 
-  # Input comes from Layer 0 (16 channels).
-  - [-1, 1, EDCM, [128, 3, 1]]         # 1-P2/4 
+  # Layer 1: EDCM [32, 3, 1] (Originally 128 * 0.25)
+  # Input is 16 (from L0), Output is 32.
+  - [-1, 1, EDCM, [32, 3, 1]]          # 1-P2/4 
   
-  - [-1, 3, C2f, [128, True]]          # 2
-  - [-1, 1, Conv, [256, 3, 2]]         # 3-P3/8
-  - [-1, 6, C2f, [256, True]]          # 4
-  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16
-  - [-1, 6, C2f, [512, True]]          # 6
-  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32
-  - [-1, 3, C2f, [1024, True]]         # 8
-  - [-1, 1, SPPF, [1024, 5]]           # 9
+  - [-1, 3, C2f, [32, True]]           # 2
+  - [-1, 1, Conv, [64, 3, 2]]          # 3-P3/8
+  - [-1, 6, C2f, [64, True]]           # 4
+  - [-1, 1, Conv, [128, 3, 2]]         # 5-P4/16
+  - [-1, 6, C2f, [128, True]]          # 6
+  - [-1, 1, Conv, [256, 3, 2]]         # 7-P5/32
+  - [-1, 3, C2f, [256, True]]          # 8
+  - [-1, 1, SPPF, [256, 5]]            # 9
 
 head:
   - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
   - [[-1, 6], 1, Concat, [1]]          # 11
-  - [-1, 3, C2f, [512]]                # 12
+  - [-1, 3, C2f, [128]]                # 12
   
-  - [-1, 1, SGAM, [512]]               # 13
+  # Layer 13: SGAM [128] (Originally 512 * 0.25)
+  - [-1, 1, SGAM, [128]]               # 13
 
   - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
   - [[-1, 4], 1, Concat, [1]]          # 15
-  - [-1, 3, C2f, [256]]                # 16
+  - [-1, 3, C2f, [64]]                 # 16
 
-  - [-1, 1, Conv, [256, 3, 2]]
-  - [[-1, 13], 1, Concat, [1]]         # 18
-  - [-1, 3, C2f, [512]]                # 19
+  - [-1, 1, Conv, [64, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]]         # 18 (Cat with SGAM)
+  - [-1, 3, C2f, [128]]                # 19
 
-  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 1, Conv, [128, 3, 2]]
   - [[-1, 9], 1, Concat, [1]]          # 21
-  - [-1, 3, C2f, [1024]]               # 22
+  - [-1, 3, C2f, [256]]                # 22
 
   - [[16, 19, 22], 1, Detect, [nc]]    # 23

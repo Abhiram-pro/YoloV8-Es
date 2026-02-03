@@ -7,12 +7,11 @@ class Attention(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, groups=1, reduction=0.0625, kernel_num=4, min_channel=16):
         super(Attention, self).__init__()
         
-        # CRITICAL FIX: Ensure valid attention channel size
+        # Calculate attention channel safely
         attention_channel = max(int(in_planes * reduction), min_channel)
         
         self.kernel_size = kernel_size
         self.kernel_num = kernel_num
-        self.temperature = 1.0
 
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Conv2d(in_planes, attention_channel, 1, bias=False)
@@ -34,32 +33,51 @@ class Attention(nn.Module):
 class EDCM(nn.Module):
     """
     Enhanced Dynamic Convolution Module (EDCM)
+    Uses Lazy Initialization to adapt to input channels automatically.
     """
     def __init__(self, c1, c2=None, k=3, s=1, g=1, kernel_num=1):
         super().__init__()
         if c2 is None: c2 = c1
         
-        # c1 comes from the previous layer.
-        # c2 comes from the YAML arg (128). 
-        # Ultralytics parser might pass unscaled args for custom modules.
-        # We assume c1 is correct (from previous layer), but c2 might need checking.
+        # Store parameters for lazy build
+        self.c2 = c2
+        self.k = k
+        self.s = s
+        self.g = g
+        self.kernel_num = kernel_num
+        
+        # We will build layers on the first forward pass
+        self.initialized = False
+        
+        # Placeholder for submodules
+        self.attention = None
+        self.weight = None
+        self.bias = None
+        self.bn = None
+        self.act = None
+
+    def _init_layers(self, x):
+        """Initialize layers based on actual input tensor x"""
+        c1 = x.shape[1] # Detect actual input channels
+        device = x.device
         
         self.in_planes = c1
-        self.out_planes = c2
-        self.kernel_num = kernel_num
-        self.kernel_size = k
-        self.groups = g
-
-        # Initialize Attention with explicit c1
-        self.attention = Attention(c1, c2, k, g)
+        self.out_planes = self.c2
         
-        self.weight = nn.Parameter(torch.randn(kernel_num, c2, c1//g, k, k), requires_grad=True)
-        self.bias = nn.Parameter(torch.zeros(c2), requires_grad=True)
+        self.attention = Attention(c1, self.c2, self.k, self.g).to(device)
         
-        self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU()
+        self.weight = nn.Parameter(torch.randn(self.kernel_num, self.c2, c1//self.g, self.k, self.k).to(device))
+        self.bias = nn.Parameter(torch.zeros(self.c2).to(device))
+        
+        self.bn = nn.BatchNorm2d(self.c2).to(device)
+        self.act = nn.SiLU().to(device)
+        
+        self.initialized = True
 
     def forward(self, x):
+        if not self.initialized:
+            self._init_layers(x)
+            
         batch_size, channels, height, width = x.size()
         
         # Calculate Attentions
@@ -67,7 +85,7 @@ class EDCM(nn.Module):
         
         channel_attn = torch.sigmoid(self.attention.channel_fc(attn_feats)).view(batch_size, 1, channels, 1, 1)
         filter_attn = torch.sigmoid(self.attention.filter_fc(attn_feats)).view(batch_size, self.out_planes, 1, 1, 1)
-        spatial_attn = torch.sigmoid(self.attention.spatial_fc(attn_feats)).view(batch_size, 1, 1, 1, self.kernel_size, self.kernel_size)
+        spatial_attn = torch.sigmoid(self.attention.spatial_fc(attn_feats)).view(batch_size, 1, 1, 1, self.k, self.k)
         kernel_attn = torch.softmax(self.attention.kernel_fc(attn_feats), dim=1).view(batch_size, self.kernel_num, 1, 1, 1, 1)
 
         weight = self.weight.unsqueeze(0) 
@@ -77,9 +95,9 @@ class EDCM(nn.Module):
         weight = (weight * kernel_attn).sum(dim=1)
         
         x = x.reshape(1, -1, height, width)
-        weight = weight.reshape(batch_size * self.out_planes, self.in_planes // self.groups, self.kernel_size, self.kernel_size)
+        weight = weight.reshape(batch_size * self.out_planes, self.in_planes // self.g, self.k, self.k)
         
-        out = F.conv2d(x, weight, bias=None, stride=1, padding=self.kernel_size//2, groups=batch_size * self.groups)
+        out = F.conv2d(x, weight, bias=None, stride=1, padding=self.k//2, groups=batch_size * self.g)
         out = out.view(batch_size, self.out_planes, height, width)
         
         out = out + self.bias.view(1, -1, 1, 1)
