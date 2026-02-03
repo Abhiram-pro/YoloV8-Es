@@ -14,7 +14,7 @@ copy_paste: 0.0
 erasing: 0.0
 auto_augment: false
 
-freeze: 22
+freeze: 0
 warmup_epochs: 5
 
 hsv_h: 0.015

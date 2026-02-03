@@ -1,169 +1,91 @@
 import torch
 import torch.nn as nn
 
-
 class WIoUv3Loss(nn.Module):
     """
-    Wise-IoU v3 Loss
-    
-    From: "Efficient and accurate road crack detection technology based on YOLOv8-ES"
-    Section 3.4 - Improved bounding box regression loss
-    
-    Key improvements over standard IoU:
-    - Dynamic non-monotonic focusing mechanism
-    - Reduces negative impact of low-quality examples
-    - Focuses gradient allocation on medium-quality anchors
-    - Better handling of noisy/ambiguous boxes
-    
-    The loss uses a wise gradient gain to dynamically adjust the contribution
-    of each anchor box based on its quality, preventing dominance by either
-    high-quality or low-quality examples.
+    Wise-IoU v3 Loss with Dynamic Focusing Mechanism
+    Includes Momentum-based Moving Average for outlier definition.
     """
-
-    def __init__(self, monotonous=False, eps=1e-7):
-        """
-        Args:
-            monotonous: If True, uses monotonic focusing (WIoU v1/v2 style)
-                       If False, uses non-monotonic focusing (WIoU v3, recommended)
-            eps: Small constant for numerical stability
-        """
+    def __init__(self, momentum=0.9, alpha=1.9, delta=3):
         super().__init__()
-        self.monotonous = monotonous
-        self.eps = eps
+        self.momentum = momentum
+        self.alpha = alpha
+        self.delta = delta
+        # Register buffer for moving average IoU loss to persist across batches
+        self.register_buffer('iou_mean', torch.tensor(1.0))
 
     def forward(self, pred, target, ret_iou=False):
         """
-        Compute WIoU v3 loss
-        
-        Args:
-            pred: Predicted boxes [N, 4] in format (x1, y1, x2, y2) or (cx, cy, w, h)
-            target: Target boxes [N, 4] in same format as pred
-            ret_iou: If True, return IoU values along with loss
-            
-        Returns:
-            loss: WIoU v3 loss value
-            iou (optional): IoU values if ret_iou=True
+        pred: [N, 4] (x1, y1, x2, y2)
+        target: [N, 4] (x1, y1, x2, y2)
         """
-        # Ensure boxes are in (x1, y1, x2, y2) format
-        if self._is_center_format(pred):
-            pred = self._center_to_corners(pred)
-        if self._is_center_format(target):
-            target = self._center_to_corners(target)
-
-        # Calculate IoU
-        iou = self._calculate_iou(pred, target)
+        iou = self._bbox_iou(pred, target)
+        dist_penalty = self._distance_penalty(pred, target)
         
-        # Calculate distance-based penalty
-        # Center distance between predicted and target boxes
-        pred_center = self._get_center(pred)
-        target_center = self._get_center(target)
-        center_distance = torch.sum((pred_center - target_center) ** 2, dim=-1)
+        # 1. Base IoU Loss
+        l_iou = 1.0 - iou
         
-        # Diagonal length of smallest enclosing box
-        c_x1 = torch.min(pred[:, 0], target[:, 0])
-        c_y1 = torch.min(pred[:, 1], target[:, 1])
-        c_x2 = torch.max(pred[:, 2], target[:, 2])
-        c_y2 = torch.max(pred[:, 3], target[:, 3])
-        c_diagonal = (c_x2 - c_x1) ** 2 + (c_y2 - c_y1) ** 2 + self.eps
+        # 2. Distance Penalty (R_WIoU denominator is detached)
+        l_wiou_v1 = l_iou + dist_penalty
         
-        # Distance ratio
-        distance_ratio = center_distance / c_diagonal
+        # 3. Dynamic Focusing (WIoU v3)
+        # Calculate outlier degree beta = L_IoU / L_IoU_Mean
+        # Detach gradients for beta calculation to avoid instability
+        loss_curr = l_iou.detach().mean()
         
-        # Wise gradient gain (dynamic focusing mechanism)
-        if self.monotonous:
-            # Monotonic focusing (v1/v2 style)
-            # Higher penalty for lower IoU
-            beta = iou.detach().clamp(min=self.eps)
-            alpha = 1.0 / beta
-        else:
-            # Non-monotonic focusing (v3 style)
-            # The wise gradient gain focuses on medium-quality anchors
-            # Formula: r = beta * delta, where beta = IoU* / (1 - IoU*)
-            # This creates a non-monotonic focusing that reduces gradient
-            # for both very high IoU (already good) and very low IoU (too hard)
-            iou_detached = iou.detach().clamp(min=self.eps, max=1.0 - self.eps)
-            
-            # Calculate outlier degree
-            # Higher for medium IoU, lower for extreme IoU values
-            beta = iou_detached / (1.0 - iou_detached)
-            
-            # The gradient gain is applied to the gradient, not the loss directly
-            # For loss computation, we use a modified approach:
-            # Use exponential of beta to create focusing effect
-            alpha = torch.exp(-beta.clamp(max=10.0))  # Clamp to prevent overflow
+        if self.training:
+            # Update moving average
+            self.iou_mean = self.iou_mean * self.momentum + \
+                            loss_curr * (1 - self.momentum)
         
-        # WIoU loss with wise gradient gain
-        # Base loss: 1 - IoU + distance_penalty
-        base_loss = 1.0 - iou + distance_ratio
+        # Beta (Outlier degree)
+        # Adding epsilon to avoid div by zero
+        beta = l_iou.detach() / (self.iou_mean.clamp(min=1e-6))
         
-        # Apply wise gradient gain
-        # The alpha modulates the loss contribution
-        loss = alpha * base_loss
+        # Focusing coefficient r
+        # r = beta / (delta * alpha^(beta - delta))
+        r = beta / (self.delta * torch.pow(self.alpha, beta - self.delta))
+        
+        # Final Loss
+        loss = r * l_wiou_v1
         
         if ret_iou:
             return loss, iou
         return loss
 
-    def _is_center_format(self, boxes):
-        """
-        Heuristic to detect if boxes are in center format (cx, cy, w, h)
-        vs corner format (x1, y1, x2, y2)
-        """
-        # If x2 < x1 or y2 < y1 for any box, likely center format
-        if boxes.shape[-1] != 4:
-            return False
-        return torch.any(boxes[:, 2] < boxes[:, 0]) or torch.any(boxes[:, 3] < boxes[:, 1])
-
-    def _center_to_corners(self, boxes):
-        """Convert boxes from (cx, cy, w, h) to (x1, y1, x2, y2)"""
-        cx, cy, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        return torch.stack([x1, y1, x2, y2], dim=-1)
-
-    def _get_center(self, boxes):
-        """Get center coordinates from corner format boxes"""
-        cx = (boxes[:, 0] + boxes[:, 2]) / 2
-        cy = (boxes[:, 1] + boxes[:, 3]) / 2
-        return torch.stack([cx, cy], dim=-1)
-
-    def _calculate_iou(self, pred, target):
-        """Calculate IoU between predicted and target boxes"""
-        # Intersection area
-        x1_inter = torch.max(pred[:, 0], target[:, 0])
-        y1_inter = torch.max(pred[:, 1], target[:, 1])
-        x2_inter = torch.min(pred[:, 2], target[:, 2])
-        y2_inter = torch.min(pred[:, 3], target[:, 3])
+    def _bbox_iou(self, box1, box2, eps=1e-7):
+        # ... (Standard IoU calculation: Intersection/Union) ...
+        # Assume box1/box2 are x1y1x2y2
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
         
-        inter_w = (x2_inter - x1_inter).clamp(min=0)
-        inter_h = (y2_inter - y1_inter).clamp(min=0)
-        inter_area = inter_w * inter_h
+        inter_x1 = torch.max(b1_x1, b2_x1)
+        inter_y1 = torch.max(b1_y1, b2_y1)
+        inter_x2 = torch.min(b1_x2, b2_x2)
+        inter_y2 = torch.min(b1_y2, b2_y2)
         
-        # Union area
-        pred_area = (pred[:, 2] - pred[:, 0]) * (pred[:, 3] - pred[:, 1])
-        target_area = (target[:, 2] - target[:, 0]) * (target[:, 3] - target[:, 1])
-        union_area = pred_area + target_area - inter_area + self.eps
+        inter_area = (inter_x2 - inter_x1).clamp(0) * (inter_y2 - inter_y1).clamp(0)
         
-        # IoU
-        iou = inter_area / union_area
-        return iou.clamp(min=0, max=1)
+        b1_area = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
+        b2_area = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
+        union = b1_area + b2_area - inter_area + eps
+        
+        return inter_area / union
 
-
-def wiou_v3_loss(pred, target, monotonous=False, eps=1e-7):
-    """
-    Functional interface for WIoU v3 loss
-    
-    Args:
-        pred: Predicted boxes [N, 4]
-        target: Target boxes [N, 4]
-        monotonous: Use monotonic (v1/v2) or non-monotonic (v3) focusing
-        eps: Small constant for numerical stability
+    def _distance_penalty(self, box1, box2, eps=1e-7):
+        # Center Distance / Diagonal^2
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
         
-    Returns:
-        loss: Mean WIoU v3 loss
-    """
-    loss_fn = WIoUv3Loss(monotonous=monotonous, eps=eps)
-    loss = loss_fn(pred, target)
-    return loss.mean()
+        cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)
+        ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)
+        
+        # The paper specifies decoupling Wg, Hg from computational graph (*)
+        c2 = (cw ** 2 + ch ** 2).detach() + eps 
+        
+        b1_cx, b1_cy = (b1_x1 + b1_x2)/2, (b1_y1 + b1_y2)/2
+        b2_cx, b2_cy = (b2_x1 + b2_x2)/2, (b2_y1 + b2_y2)/2
+        
+        rho2 = (b1_cx - b2_cx)**2 + (b1_cy - b2_cy)**2
+        
+        return torch.exp(rho2 / c2)
